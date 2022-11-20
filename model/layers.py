@@ -2,6 +2,7 @@ import torch
 from librosa.filters import mel as librosa_mel_fn
 from audio_processing import dynamic_range_compression
 from audio_processing import dynamic_range_decompression
+from audio_processing import griffin_lim
 from .stft import STFT
 
 
@@ -50,7 +51,9 @@ class TacotronSTFT(torch.nn.Module):
         mel_basis = librosa_mel_fn(
             sampling_rate, filter_length, n_mel_channels, mel_fmin, mel_fmax)
         mel_basis = torch.from_numpy(mel_basis).float()
-        self.register_buffer('mel_basis', mel_basis)
+
+        self.register_buffer('mel_basis', mel_basis, persistent=False)
+        self.register_buffer('inv_mel_basis', torch.linalg.pinv(mel_basis), persistent=False)
 
     def spectral_normalize(self, magnitudes):
         output = dynamic_range_compression(magnitudes)
@@ -70,6 +73,12 @@ class TacotronSTFT(torch.nn.Module):
         -------
         mel_output: torch.FloatTensor of shape (B, n_mel_channels, T)
         """
+
+        min_data = torch.min(y.data)
+        max_data = torch.max(y.data)
+        if min_data < -1 or max_data > 1: 
+            with torch.no_grad(): 
+                y = y / max(torch.abs(min_data), torch.abs(max_data))
         assert(torch.min(y.data) >= -1)
         assert(torch.max(y.data) <= 1)
 
@@ -78,3 +87,10 @@ class TacotronSTFT(torch.nn.Module):
         mel_output = torch.matmul(self.mel_basis, magnitudes)
         mel_output = self.spectral_normalize(mel_output)
         return mel_output
+    
+    def inv_mel_spectrogram(self, mel): 
+        # mel: (bcsz, nmel, T)
+        mel = self.spectral_de_normalize(mel)
+        magnitudes = torch.matmul(self.inv_mel_basis, mel)
+        xt = griffin_lim(magnitudes, self.stft_fn)
+        return xt

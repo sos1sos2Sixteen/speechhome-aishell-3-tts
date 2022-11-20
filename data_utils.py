@@ -1,111 +1,95 @@
-import random
-import numpy as np
-import torch
+import os.path as osp
+import torch 
 import torch.utils.data
-
-import layers
-from .utils import load_wav_to_torch, load_filepaths_and_text
+import model.layers as layers
+import model.utils as utils
+import librosa
 from text import text_to_sequence
+from preprocess_ai3 import MetaLine, fields_iter
+from torch import Tensor, LongTensor
+from typing import List, Dict, Tuple
 
+ItemType = Tuple[LongTensor, Tensor, LongTensor, Tensor, str]
+BatchType = Tuple[Tuple[LongTensor, LongTensor], Tuple[Tensor, LongTensor], LongTensor, Tensor, List[str]]
 
-class TextMelLoader(torch.utils.data.Dataset):
-    """
-        1) loads audio,text pairs
-        2) normalizes text and converts them to sequences of one-hot vectors
-        3) computes mel-spectrograms from audio files.
-    """
-    def __init__(self, audiopaths_and_text, hparams):
-        self.audiopaths_and_text = load_filepaths_and_text(audiopaths_and_text)
-        self.text_cleaners = hparams.text_cleaners
-        self.max_wav_value = hparams.max_wav_value
-        self.sampling_rate = hparams.sampling_rate
-        self.load_mel_from_disk = hparams.load_mel_from_disk
+class MultiSpeakerDataset(torch.utils.data.Dataset): 
+
+    def __init__(self, cfg): 
+        self.metalines = self.load_meta(cfg.metafile)
+        self.spk2id = self.load_spk2id(cfg.spk2id_file)
+        self.base_join_path = cfg.base_join_path
+
         self.stft = layers.TacotronSTFT(
-            hparams.filter_length, hparams.hop_length, hparams.win_length,
-            hparams.n_mel_channels, hparams.sampling_rate, hparams.mel_fmin,
-            hparams.mel_fmax)
-        random.seed(hparams.seed)
-        random.shuffle(self.audiopaths_and_text)
+            cfg.filter_length, cfg.hop_length, cfg.win_length,
+            cfg.n_mel_channels, cfg.sampling_rate, cfg.mel_fmin, 
+            cfg.mel_fmax
+        )
 
-    def get_mel_text_pair(self, audiopath_and_text):
-        # separate filename and text
-        audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
-        text = self.get_text(text)
-        mel = self.get_mel(audiopath)
-        return (text, mel)
+    
+    def __len__(self, ) -> int: return len(self.metalines)
 
-    def get_mel(self, filename):
-        if not self.load_mel_from_disk:
-            audio, sampling_rate = load_wav_to_torch(filename)
-            if sampling_rate != self.stft.sampling_rate:
-                raise ValueError("{} {} SR doesn't match target {} SR".format(
-                    sampling_rate, self.stft.sampling_rate))
-            audio_norm = audio / self.max_wav_value
-            audio_norm = audio_norm.unsqueeze(0)
-            audio_norm = torch.autograd.Variable(audio_norm, requires_grad=False)
-            melspec = self.stft.mel_spectrogram(audio_norm)
-            melspec = torch.squeeze(melspec, 0)
-        else:
-            melspec = torch.from_numpy(np.load(filename))
-            assert melspec.size(0) == self.stft.n_mel_channels, (
-                'Mel dimension mismatch: given {}, expected {}'.format(
-                    melspec.size(0), self.stft.n_mel_channels))
+    def __getitem__(self, index: int) -> ItemType: 
+        '''returns (text, mel, spkid, gate, hans)'''
+        _, path, spk, hans, phones = fields_iter(self.metalines[index])
+        text_seq = torch.LongTensor(text_to_sequence(phones.split()))
+        spkid = torch.LongTensor([self.spk2id[spk]])
 
-        return melspec
+        wave = self.load_audio(osp.join(self.base_join_path, path))
+        mel  = self.get_mel(wave)
+        gate = torch.zeros((len(mel), ))
+        gate[-1] = 1
 
-    def get_text(self, text):
-        text_norm = torch.IntTensor(text_to_sequence(text, self.text_cleaners))
-        return text_norm
+        return text_seq, mel, spkid, gate, hans
+    
+    def load_meta(self, path: str) -> List[MetaLine]: 
+        with open(path) as f: 
+            return [
+                MetaLine(*l.strip().split('|'))
+                for l in f
+            ]
+    
+    def load_spk2id(self, path: str) -> Dict[str, int]: 
+        with open(path) as f: 
+            return {
+                spk: int(idx)
+                for spk, idx in (l.strip().split('|') for l in f)
+            }
 
-    def __getitem__(self, index):
-        return self.get_mel_text_pair(self.audiopaths_and_text[index])
+    def load_audio(self, path: str) -> Tensor: 
+        wave, _ = librosa.load(path, sr=self.stft.sampling_rate, mono=True)
+        wave_trimed, _ = librosa.effects.trim(wave)
+        wave = torch.from_numpy(wave_trimed.squeeze()) # (T, )
+        return wave
 
-    def __len__(self):
-        return len(self.audiopaths_and_text)
+    def get_mel(self, wave: Tensor) -> Tensor: 
+        mel = self.stft.mel_spectrogram(wave[None])
+        return mel.squeeze(0).T   # (T, nmel)
 
 
-class TextMelCollate():
-    """ Zero-pads model inputs and targets based on number of frames per setep
-    """
-    def __init__(self, n_frames_per_step):
-        self.n_frames_per_step = n_frames_per_step
+class MultiSpeakerCollate(): 
+    def __init__(self, ) -> None: 
+        self.maxpad = utils.TensorPad(0, True, 0)
+        self.gatepad = utils.TensorPad(1, False, 0)
+        self.stack  = utils.TensorStack()
+    def __call__(self, batch: List[ItemType]) -> BatchType: 
+        seqs, mels, spkids, gates, hans = zip(*batch)
 
-    def __call__(self, batch):
-        """Collate's training batch from normalized text and mel-spectrogram
-        PARAMS
-        ------
-        batch: [text_normalized, mel_normalized]
-        """
-        # Right zero-pad all one-hot text sequences to max input length
-        input_lengths, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([len(x[0]) for x in batch]),
-            dim=0, descending=True)
-        max_input_len = input_lengths[0]
+        padded_seqs, seq_lengths = self.maxpad(seqs)
+        _, ids_sorted = torch.sort(seq_lengths, descending=True)
 
-        text_padded = torch.LongTensor(len(batch), max_input_len)
-        text_padded.zero_()
-        for i in range(len(ids_sorted_decreasing)):
-            text = batch[ids_sorted_decreasing[i]][0]
-            text_padded[i, :text.size(0)] = text
+        padded_gates = self.gatepad(gates)
+        padded_mels, mel_lengths = self.maxpad(mels)
+        padded_mels = padded_mels.permute(0, 2, 1)
 
-        # Right zero-pad mel-spec
-        num_mels = batch[0][1].size(0)
-        max_target_len = max([x[1].size(1) for x in batch])
-        if max_target_len % self.n_frames_per_step != 0:
-            max_target_len += self.n_frames_per_step - max_target_len % self.n_frames_per_step
-            assert max_target_len % self.n_frames_per_step == 0
+        return (
+            (padded_seqs[ids_sorted].contiguous(), seq_lengths[ids_sorted].contiguous()), 
+            (padded_mels[ids_sorted].contiguous(), mel_lengths[ids_sorted].contiguous()),
+            self.stack(spkids)[ids_sorted].contiguous(), 
+            padded_gates[ids_sorted].contiguous(), 
+            [hans[i] for i in ids_sorted]
+        )
 
-        # include mel padded and gate padded
-        mel_padded = torch.FloatTensor(len(batch), num_mels, max_target_len)
-        mel_padded.zero_()
-        gate_padded = torch.FloatTensor(len(batch), max_target_len)
-        gate_padded.zero_()
-        output_lengths = torch.LongTensor(len(batch))
-        for i in range(len(ids_sorted_decreasing)):
-            mel = batch[ids_sorted_decreasing[i]][1]
-            mel_padded[i, :, :mel.size(1)] = mel
-            gate_padded[i, mel.size(1)-1:] = 1
-            output_lengths[i] = mel.size(1)
 
-        return text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths
+
+
+
