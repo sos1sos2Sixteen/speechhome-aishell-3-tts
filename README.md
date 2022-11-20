@@ -2,6 +2,7 @@
 
 > 基于 Tacotron-2 实现的 AISHELL-3 多说话人语音合成实验
 
+
 ## 1. 目录结构
 ```
 root
@@ -27,4 +28,8 @@ root
 ```
 
 
+## Acknowledgement
+
+The Tacotron model itself was adapted from https://github.com/NVIDIA/tacotron2.
+`melgan` is a fork from https://github.com/seungwonpark/melgan.
 
