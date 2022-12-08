@@ -133,6 +133,7 @@ class Attention(nn.Module):
         energy = self.energy_from_parameters((Z, W, new_mu, sigma), Tt)
         if mask is not None: 
             energy = torch.masked_fill(energy, mask, self.score_mask_value)
+        # https://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
         energy = F.softmax(energy, dim=1)                                             # normal smax
         # energy = F.softmax(energy - energy.max(dim=0).value, dim=1)                 # exp-trick
         # energy = energy / energy.sum(1, keepdim=True)                               # linear norm
@@ -186,6 +187,7 @@ class Attention(nn.Module):
         '''
         # logmp: (bcsz, k, T) -> (bcsz, T)
         log_mixture = torch.logsumexp(loggaussian + logw, dim=1) # mixutre prob
+        # log(1e-8) ~= -18
         log_mixture = torch.clamp_min(log_mixture, -18)
 
         return log_mixture
