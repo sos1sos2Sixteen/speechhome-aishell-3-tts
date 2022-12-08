@@ -65,11 +65,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('cfg')
     parser.add_argument('--restore_ckpt', help='resume training from ckpt')
-    parser.add_argument(
-        '--enable_miopen',
-        action='store_true',
-        default=False,
-        help='enabling miopen on sugon clusters may results in extremely slow execution.')
     pl.Trainer.add_argparse_args(parser)
 
     args = parser.parse_args()

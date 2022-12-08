@@ -1,3 +1,4 @@
+import argparse
 import os.path as osp 
 import itertools
 from dataclasses import dataclass, fields
@@ -51,7 +52,11 @@ def fields_iter(dci):
         yield getattr(dci, f.name)
 
 def main(): 
-    base = '/Netdata/shiyao/RAWDATA/AISHELL-3/'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('base', help='base dir to decompressed aishell-3 directory')
+    args = parser.parse_args()
+    base = args.base
+    
     train_contents = parse_content(osp.join(base, 'train', 'content.txt'))
     test_contents  = parse_content(osp.join(base, 'test', 'content.txt'))
 
