@@ -23,6 +23,7 @@ class Prenet(nn.Module):
         return x
 
 
+
 class Postnet(nn.Module):
     """Postnet
         - Five 1-d convolution with 512 channels and kernel size 5
@@ -105,7 +106,7 @@ class Encoder(nn.Module):
         x = x.transpose(1, 2)
 
         # pytorch tensor are not reversible, hence the conversion
-        input_lengths = input_lengths.cpu().numpy()
+        input_lengths = input_lengths.cpu()
         x = nn.utils.rnn.pack_padded_sequence(
             x, input_lengths, batch_first=True, enforce_sorted=True)
 

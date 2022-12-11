@@ -26,7 +26,7 @@ def gmm_parameter_from_mlp_v2(mlp_vector: Tensor) -> GMMParameter :
     Sigma = F.softplus(sigma_hat)
     Delta = F.softplus(delta_hat)
     W     = F.softmax(w_hat, dim=1)
-    Z     = 2 * math.pi * Sigma * Sigma
+    Z     = 2 * math.pi * torch.pow(Sigma, 2)
 
     return (Z, W, Delta, Sigma)
 
