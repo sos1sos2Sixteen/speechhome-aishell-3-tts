@@ -61,7 +61,7 @@ python train.py configs/cfg_ai3.yaml --accelerator gpu --devices 1 --max_steps 8
 在（CPU资源较为紧缺的）NVIDIA TITAN RTX 上约耗时2天18小时；
 期间训练脚本会向`logs/ai3_gmm/lightning_logs/version_<n>/`（n取决于第几次运行）每2小时写入一个新的checkpoint，并及时更新tensorboard。
 
-![训练loss记录](train_logs.png)
+![训练loss记录](assets/train_logs.png)
 
 ## Acknowledgement
 本项目直接引用了下列仓库代码实现：
