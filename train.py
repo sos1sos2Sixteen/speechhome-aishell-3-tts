@@ -1,10 +1,12 @@
 '''
 usage: 
-CUDA_VISIBLE_DEVIECS=? python entrance.py --devices 1 --accelerator 'gpu'
+CUDA_VISIBLE_DEVIECS=? python train.py --devices 1 --accelerator 'gpu'
 
-... python entrace.py --devices 4 --accelerator gpu --strategy ddp
+or: 
+CUDA_VISIBLE_DEVICES=? python train.py --devices 4 --accelerator gpu --strategy ddp
 
---fast_dev_run
+to run a quick sanity test without generating log files, use the `--fast_dev_run` flag.
+
 
 '''
 import os 
@@ -68,8 +70,6 @@ if __name__ == '__main__':
     pl.Trainer.add_argparse_args(parser)
 
     args = parser.parse_args()
-
-    torch.backends.cudnn.enabled = args.enable_miopen
     
     main(args)
 
