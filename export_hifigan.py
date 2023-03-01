@@ -6,7 +6,7 @@ from hifigan.models import Generator
 import os.path as osp
 
 
-parser = argparse()
+parser = argparse.ArgumentParser()
 parser.add_argument('ckpt', help='path to hifigan generator checkpiont file')
 parser.add_argument('--dest', help='directory to dump the exported onnx file', default='exported')
 args = parser.parse_args()
